@@ -10,6 +10,8 @@ knitr::opts_chunk$set(echo = TRUE, warnings = FALSE, cache = TRUE)
 library(datasets)
 library(ggplot2)
 library(broom)
+library(dplyr)
+library(tidyr)
 ```
 
 ## Executive Summary
@@ -43,8 +45,6 @@ ggplot(mtcars, aes(x = as.factor(am), y = mpg))+ geom_boxplot()
 
 ## Fitting models
 
-### Linear model
-
 The first model fitted was a linear model with a single variable. 
 
 ```{r lm1}
@@ -63,6 +63,8 @@ summary(fit2)
 
 This model indicates that, when weight is held constant, the difference in mpg between automatic and manual transmission cars is negligible. The coefficient has changed from +7.245 to -0.02362, meaning that for a specific car weight, the expected mpg for a manual car is 0.02362 less than for an automatic car. It should be noted that this difference is not statistically significant at all. 
 
+## Understanding the effect of weight
+
 This result can be better understood by considering the graph below.
 
 ```{r mpg graph am wt}
@@ -71,10 +73,41 @@ ggplot(mtcars, aes(x = wt, y = mpg)) + geom_point() + facet_grid(rows = mtcars$a
 
 The graph above shows that automatic cars tend to be heavier than manual cars, and this difference in weight almost entirely explains the differences in mpg between automatic and manual cars.
 
+The graph below shows that when automatic and manual cars are considered separately both sets are data are strongly influenced by extreme points.
+
+```{r leverage}
+ggplot(mtcars, aes(x = wt, y = mpg, col = factor(am))) + geom_point() + geom_smooth(method = "lm")
+```
+
+The size of the effect of the outer points can be calculated if separate models are fitted for automatic and manual transmissions, as in the graph above.
+
+```{r separate models}
+fitauto <- lm(mpg ~ wt, mtcars[mtcars$am == 0, ])
+resultsauto <- as_tibble(data.frame(name = rownames(mtcars[mtcars$am == 0, ]), mpg = mtcars[mtcars$am == 0, 1], wt = mtcars[mtcars$am == 0, 6], hv = hatvalues(fitauto),  dffits = dffits(fitauto))) %>% mutate(av_hv = hv / mean(hv))
+fitmanual <- lm(mpg ~ wt, mtcars[mtcars$am == 1, ])
+resultsmanual <- as_tibble(data.frame(name = rownames(mtcars[mtcars$am == 1, ]), mpg = mtcars[mtcars$am == 1, 1], wt = mtcars[mtcars$am == 1, 6], hv = hatvalues(fitmanual), dffits = dffits(fitmanual))) %>% mutate(av_hv = hv/mean(hv))
+resultsauto
+resultsmanual
+```
+
+Large hatvalues and large dffits indicate large influence. It can be seen that 12, 13, 14 and 15 for automatic have at least one of these values being large.
+
+Fitting a model across both transmission types together removes the influential effect of some of these points.
+
+```{r results together}
+ggplot(mtcars, aes(x = mpg, y = wt, col = factor(am))) + geom_point() + geom_smooth(method = "lm", aes(group = 1))
+fit3 <- lm(mpg ~ wt, mtcars)
+resultsall <- as_tibble(data.frame(name = rownames(mtcars), mpg = mtcars$mpg, wt = mtcars$wt, hv = hatvalues(fit3), dffits(fit3)))
+summary(resultsall$hv)
+```
+
+The previously influential points around the middle are less influential now. Likely to be due to sparse data in this area when considering automatic and manual separately.
+
+## Check for fit
+
 The residuals are plotted in the graph below to check for fit.
 
-```{lm2 residuals}
-fit2aug <- augment(fit2)
+```{r lm2 residuals}
 ggplot(fit2, aes(x = .fitted, y = .resid)) + geom_point()
 ```
 
@@ -87,3 +120,4 @@ anova(lm(mpg ~ wt, mtcars), lm(mpg ~ wt + factor(am), mtcars))
 ```
 
 The difference between the models as a result of adding in transmission type is negligible, and nowhere near a 5% p-value.
+
